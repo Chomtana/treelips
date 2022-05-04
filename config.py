@@ -1,5 +1,11 @@
 import re
 
+def description():
+  return "Just for test"
+
+def totalSupply():
+  return 100
+
 # Can exceed 1, to be normalized later, used for selection mode
 def dropPercentage(node, parts):
   path = node.path

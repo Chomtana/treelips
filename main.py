@@ -1,8 +1,11 @@
 import os
 import config
 import random
+from PIL import Image
 
 #print(config.dropPercentage([]))
+
+supplyCounter = 0
 
 class ImageParts:
   def __init__(self, parts = []):
@@ -25,6 +28,28 @@ class ImageParts:
   def print(self):
     for node in self.parts:
       print(node.path)
+
+  def buildImage(self):
+    global supplyCounter
+
+    layers = [(part.path, part.layerOrder(self.parts)) for part in parts]
+    layers.sort(lambda x: x[1])
+
+    images = [image.open('./layers/' + '/'.join(layer[0])) for layer in layers]
+
+    max_width = max(image.size[0] for image in images)
+    max_height = max(image.size[1] for image in images)
+
+    image_sheet = Image.new("RGBA", (max_width * len(images), max_height))
+
+    for (i, image) in enumerate(images):
+      image_sheet.paste(image, (
+        max_width * 0 + (max_width - image.size[0]) / 2,
+        max_height * 0 + (max_height - image.size[1]) / 2
+      ), image)
+
+    image_sheet.save("./build/images/" + supplyCounter + ".png")
+    supplyCounter += 1
 
 EMPTY_PARTS = ImageParts()
 
