@@ -1,10 +1,32 @@
 import os
 import config
+import random
 
 #print(config.dropPercentage([]))
 
 class ImageParts:
-  pass
+  def __init__(self, parts = []):
+    self.parts = parts
+    self.completed = False
+
+  def addPart(self, part):
+    self.parts.append(part)
+
+  def setCompleted(self, completed):
+    self.completed = completed
+
+  @staticmethod
+  def merge(partss):
+    merged = []
+    for parts in partss:
+      merged.extend(parts.parts)
+    return ImageParts(merged)
+
+  def print(self):
+    for node in self.parts:
+      print(node.path)
+
+EMPTY_PARTS = ImageParts()
 
 class PartTreeNode:
   def __init__(self, path, parent = None):
@@ -13,7 +35,7 @@ class PartTreeNode:
     self.children = []
     self.parent = parent
 
-    self.distanceToLeaft = 0
+    self.distanceToLeaf = 0
 
     if parent is not None:
       parent.children.append(self)
@@ -29,6 +51,25 @@ class PartTreeNode:
   def isLeaf(self):
     return len(self.children) == 0
 
+  def buildImageParts(self):
+    if len(self.children) == 0:
+      parts = ImageParts([self])
+      return parts
+
+    isMerge = self.isMerge()
+    childParts = []
+    dropRate = []
+
+    for child in self.children:
+      parts = child.buildImageParts()
+      childParts.append(parts)
+      dropRate.append(child.dropPercentage(parts))
+
+    if isMerge:
+      return ImageParts.merge(childParts)
+    else:
+      return random.choices(population=childParts, weights=dropRate)[0]
+
   # Print tree in DFS manner
   def print(self, level=0):
     print('-' * level, self.path, self.distanceToLeaft)
@@ -42,17 +83,22 @@ class PartTreeNode:
     self.distanceToLeaft = dist
     return dist
 
-  def dropPercentage(self):
-    return config.dropPercentage(self)
+  def resetSelectedCount(self):
+    self.selectedCount = 0
+    for child in self.children:
+      child.resetSelectedCount()
+
+  def dropPercentage(self, parts = EMPTY_PARTS):
+    return config.dropPercentage(self, parts)
   
-  def layerOrder(self):
-    return config.layerOrder(self)
+  def layerOrder(self, parts = EMPTY_PARTS):
+    return config.layerOrder(self, parts)
 
-  def partKey(self):
-    return config.partKey(self)
+  def partKey(self, parts = EMPTY_PARTS):
+    return config.partKey(self, parts)
 
-  def partName(self):
-    return config.partName(self)
+  def partName(self, parts = EMPTY_PARTS):
+    return config.partName(self, parts)
 
   def isMerge(self):
     return config.isMerge(self)
@@ -89,3 +135,5 @@ def buildPartsTree():
 buildPartsTree()
 
 partTreeRoot.print()
+print("============================")
+partTreeRoot.buildImageParts().print()
