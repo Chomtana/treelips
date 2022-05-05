@@ -48,7 +48,7 @@ class ImageParts:
         max_height * 0 + (max_height - image.size[1]) / 2
       ), image)
 
-    image_sheet.save("./build/images/" + supplyCounter + ".png")
+    image_sheet.save("./build/images/" + str(supplyCounter) + ".png")
     supplyCounter += 1
 
 EMPTY_PARTS = ImageParts()
@@ -161,4 +161,4 @@ buildPartsTree()
 
 partTreeRoot.print()
 print("============================")
-partTreeRoot.buildImageParts().print()
+partTreeRoot.buildImageParts().buildImageParts()
