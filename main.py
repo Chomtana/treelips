@@ -3,6 +3,8 @@ import config
 import random
 from PIL import Image
 
+BUILD_DIR = "./build"
+
 #print(config.dropPercentage([]))
 
 supplyCounter = 0
@@ -32,24 +34,27 @@ class ImageParts:
   def buildImage(self):
     global supplyCounter
 
-    layers = [(part.path, part.layerOrder(self.parts)) for part in parts]
-    layers.sort(lambda x: x[1])
+    layers = [(part.path, part.layerOrder(self.parts)) for part in self.parts]
+    layers.sort(key = lambda x: x[1])
 
-    images = [image.open('./layers/' + '/'.join(layer[0])) for layer in layers]
+    images = [Image.open('./layers/' + '/'.join(layer[0])) for layer in layers]
 
     max_width = max(image.size[0] for image in images)
     max_height = max(image.size[1] for image in images)
 
-    image_sheet = Image.new("RGBA", (max_width * len(images), max_height))
+    image_sheet = Image.new("RGBA", (max_width, max_height))
 
     for (i, image) in enumerate(images):
       image_sheet.paste(image, (
-        max_width * 0 + (max_width - image.size[0]) / 2,
-        max_height * 0 + (max_height - image.size[1]) / 2
-      ), image)
+        max_width * 0 + (max_width - image.size[0]) // 2,
+        max_height * 0 + (max_height - image.size[1]) // 2
+      ), image.convert('RGBA'))
 
-    image_sheet.save("./build/images/" + str(supplyCounter) + ".png")
+    if not os.path.exists(BUILD_DIR + "/images"):
+      os.makedirs(BUILD_DIR + "/images")
+
     supplyCounter += 1
+    image_sheet.save(BUILD_DIR + "/images/" + str(supplyCounter) + ".png")
 
 EMPTY_PARTS = ImageParts()
 
@@ -161,4 +166,4 @@ buildPartsTree()
 
 partTreeRoot.print()
 print("============================")
-partTreeRoot.buildImageParts().buildImageParts()
+partTreeRoot.buildImageParts().buildImage()
