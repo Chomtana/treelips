@@ -4,6 +4,7 @@ import random
 import json
 import threading
 import sys
+from copy import deepcopy
 from PIL import Image
 
 BUILD_DIR = "./build"
@@ -167,6 +168,8 @@ class PartTreeNode:
 
   def buildImageParts(self, variantsRequired = None):
     if variantsRequired is None: variantsRequired = dict()
+
+    #print(self.path, variantsRequired)
     
     if len(self.children) == 0:
       parts = ImageParts([self])
@@ -181,7 +184,7 @@ class PartTreeNode:
     childSelection = []
 
     for child in self.children:
-      (parts, variants) = child.buildImageParts(variantsRequired)
+      (parts, variants) = child.buildImageParts(deepcopy(variantsRequired))
 
       if parts is None: continue
 
@@ -215,6 +218,7 @@ class PartTreeNode:
         childSelection = list(filter(lambda x: variantKey not in x[1] or x[1][variantKey] == variantsRequired[variantKey], childSelection))
 
       if len(childSelection) == 0:
+        #print('EMPTY', self.partVariantKey(childParts), self.partName(childParts), self.path)
         return (None, None)
 
       #print('AFTER', childSelection)
