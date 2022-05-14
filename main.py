@@ -1,18 +1,32 @@
 import os
 import config
 import random
+import json
+import threading
+import sys
 from PIL import Image
 
 BUILD_DIR = "./build"
+FOLDER_TEMPLATE = config.folderTemplate()
 
-#print(config.dropPercentage([]))
+METADATA_NAME = config.name()
+METADATA_DESCRIPTION = config.description()
 
-supplyCounter = 0
+supplyOffset = config.supplyOffset()
+totalSupply = config.totalSupply()
+
+def buildFolderName(variants):
+  result = []
+  for key in FOLDER_TEMPLATE:
+    if key in variants:
+      result.append(variants[key])
+  return '/'.join(result)
 
 class ImageParts:
   def __init__(self, parts = []):
     self.parts = parts
     self.completed = False
+    self.tokenId = 0
 
   def addPart(self, part):
     self.parts.append(part)
@@ -21,18 +35,27 @@ class ImageParts:
     self.completed = completed
 
   @staticmethod
-  def merge(partss):
+  def merge(selection):
     merged = []
-    for parts in partss:
-      merged.extend(parts.parts)
-    return ImageParts(merged)
+    variants = dict()
+    for parts in selection:
+      merged.extend(parts[0].parts)
+      for key in parts[1]:
+        if key and key in variants and variants[key] != parts[1][key]:
+          print(variants)
+          print(key)
+          print(parts[1])
+          print(selection)
+          raise Exception("Cannot merge different variant and same key")
+        variants[key] = parts[1][key]
+    return (ImageParts(merged), variants)
 
   def print(self):
     for node in self.parts:
       print(node.path)
 
   def buildImage(self):
-    global supplyCounter
+    tokenId = self.tokenId
 
     layers = [(part.path, part.layerOrder(self.parts)) for part in self.parts]
     layers.sort(key = lambda x: x[1])
@@ -45,16 +68,77 @@ class ImageParts:
     image_sheet = Image.new("RGBA", (max_width, max_height))
 
     for (i, image) in enumerate(images):
-      image_sheet.paste(image, (
-        max_width * 0 + (max_width - image.size[0]) // 2,
-        max_height * 0 + (max_height - image.size[1]) // 2
-      ), image.convert('RGBA'))
+      image_sheet = Image.alpha_composite(image_sheet, image)
 
-    if not os.path.exists(BUILD_DIR + "/images"):
-      os.makedirs(BUILD_DIR + "/images")
+    variants = dict()
+    attributes = dict()
 
-    supplyCounter += 1
-    image_sheet.save(BUILD_DIR + "/images/" + str(supplyCounter) + ".png")
+    for part in self.parts:
+      nodeToRoot = part.nodeToRoot()
+
+      for node in nodeToRoot:
+        key = node.partVariantKey()
+        partName = node.partName()
+        if not key: continue
+        if key in variants and variants[key] != partName:
+          print(key, partName, variants[key])
+          raise Exception("Variant conflict")
+        else:
+          variants[key] = partName
+
+      for node in nodeToRoot:
+        key = node.partKey()
+        partName = node.partName()
+        if not key: continue
+        if key in attributes and attributes[key] != partName:
+          print(key, partName, attributes[key])
+          raise Exception("Attributes conflict")
+        else:
+          attributes[key] = partName
+
+    print(variants)
+
+    jsonData = dict()
+
+    # To be compiled layer once checked
+    if METADATA_NAME:
+      jsonData['name'] = METADATA_NAME
+    
+    if METADATA_DESCRIPTION:
+      jsonData['description'] = METADATA_DESCRIPTION
+
+    jsonData['image'] = 'ipfs://{imageHash}/{tokenId}.png'
+    jsonData['attributes'] = []
+
+    for key in attributes:
+      jsonData['attributes'].append({
+        "trait_type": key,
+        "value": attributes[key]
+      })
+
+    outputDir = BUILD_DIR + "/images/" + buildFolderName(variants)
+    outputJsonDir = BUILD_DIR + "/json/" + buildFolderName(variants)
+    outputPartDir = BUILD_DIR + "/parts/" + buildFolderName(variants)
+
+    if not os.path.exists(outputDir):
+      os.makedirs(outputDir)
+
+    if not os.path.exists(outputJsonDir):
+      os.makedirs(outputJsonDir)
+
+    if not os.path.exists(outputPartDir):
+      os.makedirs(outputPartDir)
+
+    image_sheet.save(outputDir + "/" + str(tokenId) + ".png")
+
+    with open(outputJsonDir + "/" + str(tokenId) + ".json", "w", encoding="utf-8") as f:
+      json.dump(jsonData, f, indent=4)
+
+    with open(outputPartDir + "/" + str(tokenId) + ".json", "w", encoding="utf-8") as f:
+      partsJson = []
+      for node in self.parts:
+        partsJson.append(node.path)
+      json.dump(partsJson, f, indent=4)
 
 EMPTY_PARTS = ImageParts()
 
@@ -81,28 +165,82 @@ class PartTreeNode:
   def isLeaf(self):
     return len(self.children) == 0
 
-  def buildImageParts(self):
+  def buildImageParts(self, variantsRequired = None):
+    if variantsRequired is None: variantsRequired = dict()
+    
     if len(self.children) == 0:
       parts = ImageParts([self])
-      return parts
+      variantKey = self.partVariantKey()
+      variants = dict()
+      if variantKey:
+        variants[variantKey] = self.partName()
+      return (parts, variants)
 
     isMerge = self.isMerge()
     childParts = []
-    dropRate = []
+    childSelection = []
 
     for child in self.children:
-      parts = child.buildImageParts()
+      (parts, variants) = child.buildImageParts(variantsRequired)
+
+      if parts is None: continue
+
+      # Merge variants
+      if isMerge:
+        for key in variants:
+          if key and key in variantsRequired and variantsRequired[key] != variants[key]:
+            print(variantsRequired)
+            print(key)
+            print(variants)
+            raise Exception("Cannot merge sibling with different variant and same key")
+          variantsRequired[key] = variants[key]
+
       childParts.append(parts)
-      dropRate.append(child.dropPercentage(parts))
+      childSelection.append((parts, variants, child.dropPercentage(parts)))
 
     if isMerge:
-      return ImageParts.merge(childParts)
+      (parts, variants) = ImageParts.merge(childSelection)
+
+      variantKey = self.partVariantKey(childParts)
+      if variantKey:
+        variants[variantKey] = self.partName(childParts)
+
+      return (parts, variants)
     else:
-      return random.choices(population=childParts, weights=dropRate)[0]
+      #print('VARIANT', variantsRequired)
+      #print(*childSelection, sep='\n')
+      #print('BEFORE', childSelection)
+
+      for variantKey in variantsRequired:
+        childSelection = list(filter(lambda x: variantKey not in x[1] or x[1][variantKey] == variantsRequired[variantKey], childSelection))
+
+      if len(childSelection) == 0:
+        return (None, None)
+
+      #print('AFTER', childSelection)
+
+      dropRate = list(map(lambda x: x[2], childSelection))
+      (parts, variants, dropRateSingle) = random.choices(population=childSelection, weights=dropRate)[0]
+
+      variantKey = self.partVariantKey(childParts)
+      if variantKey:
+        variants[variantKey] = self.partName(childParts)
+
+      #print('***')
+
+      return (parts, variants)
+
+  def nodeToRoot(self):
+    node = self
+    result = []
+    while node.parent is not None:
+      result.append(node)
+      node = node.parent
+    return result
 
   # Print tree in DFS manner
   def print(self, level=0):
-    print('-' * level, self.path, self.distanceToLeaft)
+    print('-' * level, self.path, self.isMerge())
     for child in self.children:
       child.print(level + 1)
 
@@ -123,6 +261,9 @@ class PartTreeNode:
   
   def layerOrder(self, parts = EMPTY_PARTS):
     return config.layerOrder(self, parts)
+
+  def partVariantKey(self, parts = EMPTY_PARTS):
+    return config.partVariantKey(self, parts)
 
   def partKey(self, parts = EMPTY_PARTS):
     return config.partKey(self, parts)
@@ -164,6 +305,37 @@ def buildPartsTree():
 
 buildPartsTree()
 
+imagesParts = []
+
+def buildThread():
+  while len(imagesParts) > 0:
+    parts = imagesParts[-1]
+    imagesParts.pop()
+    parts.print()
+    parts.buildImage()
+    print("============================")
+
 partTreeRoot.print()
 print("============================")
-partTreeRoot.buildImageParts().buildImage()
+
+if False:
+  imagesParts = [None] * totalSupply
+
+  for root, subdirs, files in os.walk('./build/parts'):
+    for f in files:
+      if not f.endswith('.json'): continue
+      parts = json.load(open(root + '/' + f, encoding='utf-8'))
+      tokenId = int(f.split('.')[0])
+      imagesParts[tokenId - 1] = ImageParts(list(map(lambda x: getPartTreeNode(x), parts)))
+      imagesParts[tokenId - 1].tokenId = tokenId
+else:
+  for i in range(totalSupply):
+    parts = partTreeRoot.buildImageParts()
+    parts[0].tokenId = i + supplyOffset
+    imagesParts.append(parts[0])
+
+imagesParts = imagesParts[::-1]
+
+for i in range(config.threadCount()):
+  thread = threading.Thread(target=buildThread)
+  thread.start()
